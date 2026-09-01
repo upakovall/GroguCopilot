@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import httpx
 from ..schemas.context import ViewContext
 from ..schemas.actions import AgentResponse
@@ -33,7 +33,8 @@ class OpenAIGuidedProvider(BaseLLMProvider):
         self,
         prompt: str,
         context: ViewContext,
-        registry: MCPRegistry
+        registry: MCPRegistry,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> AgentResponse:
         """Call remote RunPod / local vLLM endpoint with strict JSON schema guided decoding."""
         schema = AgentResponse.model_json_schema()
@@ -41,6 +42,7 @@ class OpenAIGuidedProvider(BaseLLMProvider):
 
         system_prompt = f"""You are Grogu Voice AI Copilot, a high-precision, UI-aware intelligent assistant.
 You receive the user's spoken command and the declarative ViewContext (semantic UI state).
+You maintain conversational awareness across dialogue turns.
 You must output ONLY a valid JSON object strictly conforming to the JSON Schema. Do NOT wrap output in markdown fences.
 
 JSON Schema:
@@ -56,13 +58,18 @@ High-level Domain State:
 {json.dumps(context.state_summary, indent=2)}
 """
 
+        # Build message history
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            # Include recent conversation turns for multi-turn reasoning
+            for turn in history[-10:]:
+                messages.append(turn)
+        messages.append({"role": "user", "content": prompt})
+
         # Build payload compatible with vLLM / llama.cpp guided decoding
         payload: Dict[str, Any] = {
             "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             # Universal guided decoding parameters (vLLM guided_json + OpenAI json_object)
@@ -79,7 +86,7 @@ High-level Domain State:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        logger.info(f"[OpenAIGuidedProvider] Sending prompt to RunPod/vLLM endpoint: {self.api_base}/chat/completions")
+        logger.info(f"[OpenAIGuidedProvider] Sending prompt with history ({len(messages)} messages) to vLLM endpoint: {self.api_base}/chat/completions")
 
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(

@@ -1,27 +1,22 @@
-"""Copilot Engine Session Orchestrator.
-
-Pure vanilla Python session coordinator linking STT, Dynamic LLM Reasoning,
-MCP Registry validation, and TTS synthesis.
-"""
+"""Decoupled Grogu Voice AI Copilot Session Engine."""
 
 import base64
 import logging
-from typing import AsyncGenerator, Optional
-
+from typing import Optional, AsyncGenerator, List, Dict
 from .schemas.context import ViewContext
 from .schemas.actions import AgentResponse
 from .schemas.messages import OutboundWSMessage, ServerMessageType
 from .registry import MCPRegistry
-from .audio.stt import STTService
-from .audio.tts import TTSService
 from .llm.provider import BaseLLMProvider
 from .llm.dynamic_reasoner import DynamicReasoner
+from .audio.stt import STTService
+from .audio.tts import TTSService
 
 logger = logging.getLogger(__name__)
 
 
 class CopilotEngine:
-    """Decoupled Voice AI Copilot Session Engine."""
+    """Decoupled Voice AI Copilot Session Engine with Multi-Turn Conversation Memory."""
 
     def __init__(
         self,
@@ -35,6 +30,7 @@ class CopilotEngine:
         self.stt = stt_service or STTService()
         self.tts = tts_service or TTSService()
         self._audio_buffer = bytearray()
+        self.conversation_history: List[Dict[str, str]] = []
 
     def update_view_context(self, context: ViewContext) -> None:
         """Update active ViewContext in registry."""
@@ -47,6 +43,10 @@ class CopilotEngine:
     def clear_audio_buffer(self) -> None:
         """Reset audio accumulation buffer."""
         self._audio_buffer.clear()
+
+    def clear_history(self) -> None:
+        """Reset multi-turn conversation memory."""
+        self.conversation_history.clear()
 
     async def process_voice_stream(self) -> AsyncGenerator[OutboundWSMessage, None]:
         """Transcribe accumulated 16kHz PCM stream, execute reasoning, and yield responses."""
@@ -68,7 +68,7 @@ class CopilotEngine:
 
         transcript = self.stt.transcribe(audio_data)
         if not transcript:
-            transcript = "Filter servers to show only active instances"
+            transcript = "Status check"
 
         yield OutboundWSMessage(
             type=ServerMessageType.TRANSCRIPTION,
@@ -81,7 +81,7 @@ class CopilotEngine:
             yield msg
 
     async def process_text_prompt(self, prompt: str) -> AsyncGenerator[OutboundWSMessage, None]:
-        """Process natural language command against ViewContext."""
+        """Process natural language command against ViewContext with multi-turn memory."""
         context = self.registry.get_context()
         if not context:
             yield OutboundWSMessage(
@@ -95,12 +95,20 @@ class CopilotEngine:
             text=f"Reasoning over ViewContext '{context.screen_id}'..."
         )
 
-        # 3. Dynamic LLM structured reasoning
+        # 3. Dynamic LLM structured reasoning with dialogue history
         agent_response: AgentResponse = await self.llm.generate_response(
             prompt=prompt,
             context=context,
-            registry=self.registry
+            registry=self.registry,
+            history=self.conversation_history,
         )
+
+        # 4. Save dialogue turn to history
+        self.conversation_history.append({"role": "user", "content": prompt})
+        self.conversation_history.append({
+            "role": "assistant",
+            "content": f"{agent_response.speech_output} (Thought: {agent_response.thought})"
+        })
 
         # Emit structured response immediately
         yield OutboundWSMessage(
@@ -108,7 +116,7 @@ class CopilotEngine:
             agent_response=agent_response
         )
 
-        # 4. Synthesize spoken response via TTS (emitting 44-byte RIFF/WAV header)
+        # 5. Synthesize spoken response via TTS (emitting 44-byte RIFF/WAV header)
         if agent_response.speech_output:
             yield OutboundWSMessage(
                 type=ServerMessageType.AGENT_THINKING,

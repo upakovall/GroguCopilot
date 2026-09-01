@@ -147,6 +147,8 @@ def create_copilot_router(
                             async for out_msg in engine.process_text_prompt(inbound.text):
                                 await websocket.send_text(out_msg.model_dump_json())
 
+                    elif inbound.type == ClientMessageType.CLEAR_HISTORY if hasattr(ClientMessageType, 'CLEAR_HISTORY') else False:
+                        engine.clear_history()
                     elif inbound.type == ClientMessageType.ACTION_ACK:
                         logger.debug(f"[CopilotRouter] Action ACK: {inbound.data}")
 

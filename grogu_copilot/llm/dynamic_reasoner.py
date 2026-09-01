@@ -23,7 +23,8 @@ class DynamicReasoner(BaseLLMProvider):
         self,
         prompt: str,
         context: ViewContext,
-        registry: MCPRegistry
+        registry: MCPRegistry,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> AgentResponse:
         """Dynamically parses prompt against current ViewContext components."""
         p_lower = prompt.lower().strip()

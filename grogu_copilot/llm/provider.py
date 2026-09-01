@@ -1,6 +1,7 @@
 """Base LLM Provider Interface."""
 
 from abc import ABC, abstractmethod
+from typing import Optional, List, Dict
 from ..schemas.context import ViewContext
 from ..schemas.actions import AgentResponse
 from ..registry import MCPRegistry
@@ -14,7 +15,8 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         context: ViewContext,
-        registry: MCPRegistry
+        registry: MCPRegistry,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> AgentResponse:
         """Generate structured AgentResponse for user prompt and ViewContext."""
         pass
