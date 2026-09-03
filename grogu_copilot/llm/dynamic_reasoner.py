@@ -2,7 +2,7 @@
 
 Analyzes natural language prompts against active ViewContext and MCPRegistry
 to dynamically construct structured UIActions without hardcoded domain bindings.
-Supports English, Russian, and multilingual commands with conversational intelligence.
+Generates warm, lively, and highly natural conversational speech responses.
 """
 
 import re
@@ -31,11 +31,19 @@ class DynamicReasoner(BaseLLMProvider):
         matched_actions: List[UIAction] = []
         reasoning_steps: List[str] = []
 
+        is_ru = bool(re.search(r"[а-яё]", p_lower))
+        is_uk = bool(re.search(r"[іїєґ]", p_lower))
+
         logger.info(f"[DynamicReasoner] Reasoning over {len(context.components)} components for prompt: '{prompt}'")
 
-        # 0. Conversational Intelligence & Identity Handling
+        # 0. Conversational Intelligence, Identity & Greetings
         if any(w in p_lower for w in ["who are you", "what is your name", "what's your name", "кто ты", "как тебя зовут", "твое имя", "твоё имя", "хто ти", "як тебе звати"]):
-            speech = "I am Grogu AI Copilot, your voice assistant. I can manage servers, execute trading orders, filter tables, and control this interface in real-time."
+            if is_uk:
+                speech = "Я — Grogu AI Copilot, ваш розумний голосовий помічник! Можу керувати серверами, виставляти ордери та фільтрувати дані."
+            elif is_ru:
+                speech = "Я — Grogu AI Copilot, ваш голосовой ассистент! Могу переключать темы, фильтровать серверы, выставлять торговые ордера и управлять этим интерфейсом."
+            else:
+                speech = "I am Grogu AI Copilot, your voice assistant! I can manage cluster nodes, execute trading orders, filter tables, and control this interface in real-time."
             return AgentResponse(
                 thought="User inquired about assistant identity.",
                 speech_output=speech,
@@ -48,7 +56,12 @@ class DynamicReasoner(BaseLLMProvider):
             )
 
         if any(w in p_lower for w in ["hello", "hi", "hey", "привет", "здравствуйте", "добрый день", "вітаю", "добрий день"]):
-            speech = "Hello! I am online and listening. How can I assist you with the dashboard today?"
+            if is_uk:
+                speech = "Привіт! Я на зв'язку та уважно слухаю. Чим можу допомогти?"
+            elif is_ru:
+                speech = "Привет! Я на связи и внимательно слушаю. Чем могу помочь по дашборду?"
+            else:
+                speech = "Hello! I am online and listening. How can I assist you with the dashboard today?"
             return AgentResponse(
                 thought="Greeting recognized.",
                 speech_output=speech,
@@ -61,7 +74,12 @@ class DynamicReasoner(BaseLLMProvider):
             )
 
         if any(w in p_lower for w in ["help", "what can you do", "commands", "что ты умеешь", "помощь", "команды", "що ти вмієш", "допомога"]):
-            speech = "You can ask me to filter servers, toggle dark and light theme, deploy clusters, execute crypto trades, or set stop loss limits."
+            if is_uk:
+                speech = "Ви можете попросити мене: 'Покажи неробочі сервери', 'Зміни тему', або 'Купи 2 біткоїни'!"
+            elif is_ru:
+                speech = "Вы можете попросить меня: 'Покажи неисправные серверы', 'Переключи тему', 'Увеличь количество нод до 8' или 'Купи 2 биткоина'!"
+            else:
+                speech = "You can ask me to: 'Show unhealthy servers', 'Toggle theme', 'Scale worker nodes to 8', or 'Buy 2 Bitcoin'!"
             return AgentResponse(
                 thought="Help request processed.",
                 speech_output=speech,
@@ -85,7 +103,7 @@ class DynamicReasoner(BaseLLMProvider):
                 reasoning_steps.append("Global reset triggered.")
 
         # 2. Priority: Unhealthy / Problem Server Filtering
-        unhealthy_keywords = ["неисправ", "проблем", "ошибк", "упавш", "сбойн", "сломан", "неисправн", "unhealth", "error", "fail", "broken", "down", "fault"]
+        unhealthy_keywords = ["неисправ", "проблем", "ошибк", "упавш", "сбойн", "сломан", "неробоч", "unhealth", "error", "fail", "broken", "down", "fault"]
         if any(kw in p_lower for kw in unhealthy_keywords):
             filter_comp = next((c for c in context.components if "filter" in c.id.lower() or "status" in c.id.lower()), None)
             if filter_comp:
@@ -100,7 +118,7 @@ class DynamicReasoner(BaseLLMProvider):
                 reasoning_steps.append("Negative status filter matched.")
 
         # 3. Active / Healthy Server Filtering
-        elif any(kw in p_lower for kw in ["активн", "работа", "исправн", "нормальн", "живые", "active", "healthy", "running", "online", "up"]):
+        elif any(kw in p_lower for kw in ["активн", "работа", "исправн", "нормальн", "живые", "активні", "active", "healthy", "running", "online", "up"]):
             filter_comp = next((c for c in context.components if "filter" in c.id.lower() or "status" in c.id.lower()), None)
             if filter_comp:
                 val = "active"
@@ -114,7 +132,7 @@ class DynamicReasoner(BaseLLMProvider):
                 reasoning_steps.append("Active status filter matched.")
 
         # 4. Modals (Open / Close)
-        if any(w in p_lower for w in ["deploy", "разверни", "развернуть", "деплой", "order", "подтверди", "ордер"]):
+        if any(w in p_lower for w in ["deploy", "разверни", "развернуть", "деплой", "order", "подтверди", "ордер", "розгорни"]):
             modal_comp = next((c for c in context.components if c.type == "modal" or "modal" in c.id.lower() or "deploy" in c.id.lower()), None)
             if modal_comp:
                 if modal_comp.type == "modal":
@@ -131,7 +149,7 @@ class DynamicReasoner(BaseLLMProvider):
                     ))
                 reasoning_steps.append(f"Modal action on {modal_comp.id}.")
 
-        if any(w in p_lower for w in ["close", "cancel", "закрыть", "отмена", "отменить"]):
+        if any(w in p_lower for w in ["close", "cancel", "закрыть", "отмена", "отменить", "закрити", "скасувати"]):
             if context.active_modal:
                 matched_actions.append(UIAction(
                     action_type=ActionType.CLOSE_MODAL,
@@ -147,19 +165,19 @@ class DynamicReasoner(BaseLLMProvider):
 
             # Theme switch
             if "theme" in cid or "theme" in clabel:
-                if any(w in p_lower for w in ["theme", "тема", "тему", "темную", "светлую", "темная", "светлая", "dark", "light"]):
+                if any(w in p_lower for w in ["theme", "тема", "тему", "темную", "светлую", "темная", "светлая", "темну", "світлу", "dark", "light"]):
                     matched_actions.append(UIAction(
                         action_type=ActionType.TOGGLE_SWITCH,
                         target_id=comp.id,
-                        payload={"state": "light" if "light" in p_lower or "светл" in p_lower else "dark"},
+                        payload={"state": "light" if any(w in p_lower for w in ["light", "светл", "світл"]) else "dark"},
                         description=f"Toggled theme on {comp.id}"
                     ))
                     reasoning_steps.append(f"Theme toggle on {comp.id}.")
 
             # Autoscaling / Switches
             elif comp.type == "switch" or "switch" in cid:
-                if any(w in p_lower for w in [cid, clabel, "autoscale", "автомасштаб", "hedging", "хеджир"]):
-                    target_state = False if any(w in p_lower for w in ["disable", "выключи", "off", "отключи", "стоп"]) else True
+                if any(w in p_lower for w in [cid, clabel, "autoscale", "автомасштаб", "hedging", "хеджир", "хеджуван"]):
+                    target_state = False if any(w in p_lower for w in ["disable", "выключи", "off", "отключи", "стоп", "вимкни"]) else True
                     matched_actions.append(UIAction(
                         action_type=ActionType.TOGGLE_SWITCH,
                         target_id=comp.id,
@@ -189,16 +207,21 @@ class DynamicReasoner(BaseLLMProvider):
                         target_id=comp.id,
                         description=f"Switched to tab {comp.id}"
                     ))
-                elif ("trade" in p_lower or "торгов" in p_lower) and "trade" in cid:
+                elif any(w in p_lower for w in ["trade", "торгов", "торгів"]) and "trade" in cid:
                     matched_actions.append(UIAction(
                         action_type=ActionType.CLICK_BUTTON,
                         target_id=comp.id,
                         description=f"Switched to tab {comp.id}"
                     ))
 
-        # 6. Construct Acoustic Speech Output and Thoughts
+        # 6. Construct Warm, Human-Like Speech Output
         if not matched_actions:
-            speech = f"I understood: '{prompt}'. No specific UI component was matched, but I am ready for commands."
+            if is_uk:
+                speech = f"Я зрозумів запит: '{prompt}'. Готовий виконувати ваші команди!"
+            elif is_ru:
+                speech = f"Конечно, понял: '{prompt}'. Готов к вашим командам по интерфейсу!"
+            else:
+                speech = f"Understood: '{prompt}'. Ready for your commands!"
             thought = "No direct UI component match found."
             matched_actions.append(UIAction(
                 action_type=ActionType.NOTIFY_USER,
@@ -210,19 +233,60 @@ class DynamicReasoner(BaseLLMProvider):
             first_act = matched_actions[0]
             if first_act.action_type == ActionType.FILTER_TABLE:
                 filter_val = first_act.payload.get("value", "target")
-                speech = f"Filtered view to show {filter_val} items."
+                if is_uk:
+                    speech = f"Звісно! Показую {filter_val} сервери."
+                elif is_ru:
+                    speech = "Конечно! Показываю только неисправные серверы." if filter_val == "unhealthy" else "Без проблем! Отображаю активные серверы."
+                else:
+                    speech = f"Sure thing! Filtering view to show {filter_val} servers right away."
             elif first_act.action_type == ActionType.TOGGLE_SWITCH:
-                speech = f"Toggled setting."
+                if "theme" in first_act.target_id.lower():
+                    if is_uk:
+                        speech = "Звісно, перемикаю тему оформлення!"
+                    elif is_ru:
+                        speech = "Конечно, с удовольствием переключаю тему оформления!"
+                    else:
+                        speech = "Sure thing! Switching the interface theme right away."
+                else:
+                    if is_uk:
+                        speech = "Зроблено! Перемикач оновлено."
+                    elif is_ru:
+                        speech = "Без проблем, настройка переключена!"
+                    else:
+                        speech = "Done! Successfully updated setting."
             elif first_act.action_type == ActionType.SET_INPUT_VALUE:
-                speech = f"Updated value to {first_act.payload.get('value')}."
+                val = first_act.payload.get('value')
+                if is_uk:
+                    speech = f"Зроблено! Встановив значення {val}."
+                elif is_ru:
+                    speech = f"Готово! Выставил значение {val}."
+                else:
+                    speech = f"Done! Updated value to {val}."
             elif first_act.action_type == ActionType.OPEN_MODAL:
-                speech = "Opened confirmation dialog."
+                if is_uk:
+                    speech = "Відкриваю вікно підтвердження."
+                elif is_ru:
+                    speech = "Конечно, открываю окно подтверждения деплоя!"
+                else:
+                    speech = "Opening confirmation dialog for you."
             elif first_act.action_type == ActionType.CLOSE_MODAL:
-                speech = "Closed dialog."
+                if is_uk:
+                    speech = "Закрив модальне вікно."
+                elif is_ru:
+                    speech = "Закрыл окно."
+                else:
+                    speech = "Closed the modal dialog."
             elif first_act.action_type == ActionType.CLICK_BUTTON:
-                speech = "Executed action."
+                if "risk" in first_act.target_id.lower():
+                    speech = "Переключил на вкладку управления рисками." if is_ru else "Switched to Risk & Hedging tab."
+                elif "trade" in first_act.target_id.lower():
+                    speech = "Открыл торговый терминал." if is_ru else "Switched to Trade Terminal."
+                elif "reset" in first_act.target_id.lower():
+                    speech = "Сбросил все фильтры к значениям по умолчанию." if is_ru else "Reset all filters to default."
+                else:
+                    speech = "Конечно, выполняю действие!" if is_ru else "Executed action successfully."
             else:
-                speech = "Command executed successfully."
+                speech = "Конечно, всё выполнено!" if is_ru else "Command executed successfully."
 
             thought = " -> ".join(reasoning_steps)
 

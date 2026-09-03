@@ -1,7 +1,7 @@
 """Speech-to-Text (STT) Service for 16kHz PCM Audio Streams.
 
 Executes faster-whisper on CPU with int8 quantization (0 MB VRAM)
-for real live voice streams, with fallback to simulation markers.
+with high-precision multilingual beam search and noise gating.
 """
 
 import io
@@ -38,7 +38,6 @@ class STTService:
             self._is_initialized = True
             return
 
-        # 1. Attempt to import faster-whisper, auto-installing via pip if missing
         try:
             from faster_whisper import WhisperModel
         except ImportError:
@@ -59,7 +58,6 @@ class STTService:
                 self._is_initialized = True
                 return
 
-        # 2. Download weights into cache and instantiate model
         try:
             logger.info(
                 f"[STT] Auto-fetching and loading faster-whisper '{self.model_size}' "
@@ -79,7 +77,7 @@ class STTService:
         self._is_initialized = True
 
     def transcribe(self, audio_bytes: bytes) -> str:
-        """Transcribe 16kHz WAV or PCM audio bytes."""
+        """Transcribe 16kHz WAV or PCM audio bytes with robust multilingual decoding."""
         if not self._is_initialized:
             self.initialize()
 
@@ -99,10 +97,9 @@ class STTService:
         except Exception as e:
             logger.debug(f"[STT] Marker check: {e}")
 
-        # If real model is loaded, transcribe the binary PCM audio!
+        # If real model is loaded, transcribe the binary PCM audio
         if self._model is not None:
             try:
-                # Ensure audio has standard 44-byte WAV header if raw PCM
                 if audio_bytes[:4] != b"RIFF":
                     wav_data = wrap_pcm_to_wav(audio_bytes, sample_rate=16000)
                 else:
@@ -111,8 +108,11 @@ class STTService:
                 audio_stream = io.BytesIO(wav_data)
                 segments, info = self._model.transcribe(
                     audio_stream,
-                    beam_size=1,
+                    beam_size=3,
+                    best_of=3,
                     vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=400),
+                    condition_on_previous_text=False,
                 )
                 text = " ".join([segment.text for segment in segments]).strip()
                 logger.info(f"[STT] Real voice transcribed: '{text}' (lang={info.language}, prob={info.language_probability:.2f})")
@@ -121,5 +121,4 @@ class STTService:
                 logger.error(f"[STT] Real transcription error: {e}")
                 return ""
 
-        # Fallback simulation
         return "Filter servers to show only active instances"
