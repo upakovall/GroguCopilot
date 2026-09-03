@@ -38,6 +38,7 @@ def create_copilot_router(
     endpoint_path: str = "/ws/copilot",
     stt_model_size: str = "base",
     stt_device: str = "cpu",
+    preload_stt: bool = True,
 ) -> APIRouter:
     """Factory creating a decoupled FastAPI APIRouter for the Voice AI Copilot.
     
@@ -50,6 +51,7 @@ def create_copilot_router(
         endpoint_path: WebSocket route path (default: "/ws/copilot").
         stt_model_size: faster-whisper model size (default: "base").
         stt_device: Execution device for STT (default: "cpu" for 0 VRAM).
+        preload_stt: Eagerly pre-warm and download faster-whisper model on CPU (default: True).
         
     Returns:
         FastAPI APIRouter ready to be mounted via app.include_router().
@@ -73,6 +75,15 @@ def create_copilot_router(
         use_mock=(llm_backend == "mock"),
     )
     tts_service = TTSService(sample_rate=16000)
+
+    # Pre-fetch faster-whisper model weights in background on startup (e.g. RunPod)
+    if preload_stt and llm_backend != "mock":
+        import threading
+        threading.Thread(
+            target=stt_service.initialize,
+            daemon=True,
+            name="copilot-stt-preloader"
+        ).start()
 
     @router.websocket(endpoint_path)
     async def copilot_ws_endpoint(websocket: WebSocket):

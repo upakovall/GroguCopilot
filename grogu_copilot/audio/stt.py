@@ -30,15 +30,40 @@ class STTService:
         self._is_initialized = False
 
     def initialize(self) -> None:
-        """Initialize faster-whisper model on CPU."""
+        """Initialize and pre-fetch faster-whisper model on CPU."""
         if self._is_initialized:
             return
 
+        if self.use_mock:
+            self._is_initialized = True
+            return
+
+        # 1. Attempt to import faster-whisper, auto-installing via pip if missing
         try:
             from faster_whisper import WhisperModel
+        except ImportError:
+            logger.info("[STT] faster-whisper not found in environment. Auto-installing via pip...")
+            try:
+                import subprocess
+                import sys
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "faster-whisper>=1.0.0"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                from faster_whisper import WhisperModel
+                logger.info("[STT] faster-whisper auto-installed successfully.")
+            except Exception as pip_err:
+                logger.warning(f"[STT] Could not auto-install faster-whisper ({pip_err}). Falling back to simulation.")
+                self._model = None
+                self._is_initialized = True
+                return
+
+        # 2. Download weights into cache and instantiate model
+        try:
             logger.info(
-                f"[STT] Loading faster-whisper '{self.model_size}' "
-                f"on {self.device} ({self.compute_type}) [0 VRAM]"
+                f"[STT] Auto-fetching and loading faster-whisper '{self.model_size}' "
+                f"on {self.device} ({self.compute_type}) [0 VRAM]..."
             )
             self._model = WhisperModel(
                 self.model_size,
@@ -46,9 +71,9 @@ class STTService:
                 compute_type=self.compute_type,
                 cpu_threads=4,
             )
-            logger.info("[STT] faster-whisper loaded successfully on CPU.")
+            logger.info("[STT] faster-whisper model ready on CPU.")
         except Exception as e:
-            logger.warning(f"[STT] faster-whisper not initialized ({e}). Using simulation mode.")
+            logger.warning(f"[STT] faster-whisper model load note ({e}). Using simulation mode.")
             self._model = None
 
         self._is_initialized = True
