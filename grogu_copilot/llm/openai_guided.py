@@ -1,7 +1,8 @@
-"""OpenAI-compatible Guided Decoding Provider for RunPod / vLLM / llama.cpp."""
+"""OpenAI-compatible Guided Decoding Provider for RunPod / vLLM / llama.cpp / Ollama."""
 
 import json
 import logging
+import re
 from typing import Optional, Dict, Any, List
 import httpx
 from ..schemas.context import ViewContext
@@ -13,13 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIGuidedProvider(BaseLLMProvider):
-    """Guided JSON Decoding provider for vLLM / llama.cpp / RunPod endpoints."""
+    """Guided JSON Decoding provider for vLLM / llama.cpp / Ollama / RunPod endpoints."""
 
     def __init__(
         self,
         api_base: str = "http://localhost:8001/v1",
         api_key: Optional[str] = None,
-        model_name: str = "Qwen/Qwen2.5-7B-Instruct-AWQ",
+        model_name: str = "qwen2.5:14b",
         temperature: float = 0.1,
         max_tokens: int = 512,
     ):
@@ -36,7 +37,7 @@ class OpenAIGuidedProvider(BaseLLMProvider):
         registry: MCPRegistry,
         history: Optional[List[Dict[str, str]]] = None,
     ) -> AgentResponse:
-        """Call remote RunPod / local vLLM endpoint with strict JSON schema guided decoding."""
+        """Call remote RunPod / local vLLM / Ollama endpoint with JSON schema guided decoding."""
         schema = AgentResponse.model_json_schema()
         components_list = [comp.model_dump() for comp in context.components]
 
@@ -61,23 +62,16 @@ High-level Domain State:
         # Build message history
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            # Include recent conversation turns for multi-turn reasoning
             for turn in history[-10:]:
                 messages.append(turn)
         messages.append({"role": "user", "content": prompt})
 
-        # Build payload compatible with vLLM / llama.cpp guided decoding
         payload: Dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            # Universal guided decoding parameters (vLLM guided_json + OpenAI json_object)
-            "response_format": {
-                "type": "json_object",
-                "schema": schema,
-            },
-            "guided_json": schema,  # vLLM native guided decoding parameter
+            "response_format": {"type": "json_object"},
         }
 
         headers = {
@@ -86,9 +80,9 @@ High-level Domain State:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        logger.info(f"[OpenAIGuidedProvider] Sending prompt with history ({len(messages)} messages) to vLLM endpoint: {self.api_base}/chat/completions")
+        logger.info(f"[OpenAIGuidedProvider] Sending prompt with history ({len(messages)} messages) to LLM endpoint: {self.api_base}/chat/completions")
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{self.api_base}/chat/completions",
                 json=payload,
@@ -96,9 +90,13 @@ High-level Domain State:
             )
             resp.raise_for_status()
             res_data = resp.json()
-            raw_content = res_data["choices"][0]["message"]["content"]
+            raw_content = res_data["choices"][0]["message"]["content"].strip()
             
-            # Parse and validate against Pydantic schema
+            # Clean markdown JSON code fences if model returned them
+            if raw_content.startswith("```"):
+                raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
+                raw_content = re.sub(r"\s*```$", "", raw_content)
+
             parsed = json.loads(raw_content)
             agent_response = AgentResponse.model_validate(parsed)
             return agent_response
