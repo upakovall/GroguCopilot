@@ -9,6 +9,7 @@ from ..schemas.context import ViewContext
 from ..schemas.actions import AgentResponse
 from ..registry import MCPRegistry
 from .provider import BaseLLMProvider
+from .dynamic_reasoner import DynamicReasoner
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class OpenAIGuidedProvider(BaseLLMProvider):
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.fallback_reasoner = DynamicReasoner()
 
     async def generate_response(
         self,
@@ -82,21 +84,25 @@ High-level Domain State:
 
         logger.info(f"[OpenAIGuidedProvider] Sending prompt with history ({len(messages)} messages) to LLM endpoint: {self.api_base}/chat/completions")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.api_base}/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            resp.raise_for_status()
-            res_data = resp.json()
-            raw_content = res_data["choices"][0]["message"]["content"].strip()
-            
-            # Clean markdown JSON code fences if model returned them
-            if raw_content.startswith("```"):
-                raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
-                raw_content = re.sub(r"\s*```$", "", raw_content)
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                resp = await client.post(
+                    f"{self.api_base}/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                resp.raise_for_status()
+                res_data = resp.json()
+                raw_content = res_data["choices"][0]["message"]["content"].strip()
+                
+                # Clean markdown JSON code fences if model returned them
+                if raw_content.startswith("```"):
+                    raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
+                    raw_content = re.sub(r"\s*```$", "", raw_content)
 
-            parsed = json.loads(raw_content)
-            agent_response = AgentResponse.model_validate(parsed)
-            return agent_response
+                parsed = json.loads(raw_content)
+                agent_response = AgentResponse.model_validate(parsed)
+                return agent_response
+        except Exception as e:
+            logger.warning(f"[OpenAIGuidedProvider] LLM endpoint unreachable ({e}). Gracefully executing via DynamicReasoner fallback.")
+            return await self.fallback_reasoner.generate_response(prompt, context, registry, history)
