@@ -50,35 +50,38 @@ class CopilotEngine:
 
     async def process_voice_stream(self) -> AsyncGenerator[OutboundWSMessage, None]:
         """Transcribe accumulated 16kHz PCM stream, execute reasoning, and yield responses."""
-        audio_data = bytes(self._audio_buffer)
-        self.clear_audio_buffer()
+        try:
+            audio_data = bytes(self._audio_buffer)
+            self.clear_audio_buffer()
 
-        if not audio_data:
+            if not audio_data:
+                yield OutboundWSMessage(
+                    type=ServerMessageType.ERROR,
+                    error="No audio stream data received"
+                )
+                return
+
+            # 1. Transcribe speech using faster-whisper on CPU
             yield OutboundWSMessage(
-                type=ServerMessageType.ERROR,
-                error="No audio stream data received"
+                type=ServerMessageType.AGENT_THINKING,
+                text="Transcribing voice input..."
             )
-            return
 
-        # 1. Transcribe speech using faster-whisper on CPU
-        yield OutboundWSMessage(
-            type=ServerMessageType.AGENT_THINKING,
-            text="Transcribing voice input..."
-        )
+            transcript = self.stt.transcribe(audio_data)
+            if not transcript:
+                transcript = "Status check"
 
-        transcript = self.stt.transcribe(audio_data)
-        if not transcript:
-            transcript = "Status check"
+            yield OutboundWSMessage(
+                type=ServerMessageType.TRANSCRIPTION,
+                text=transcript,
+                is_final=True
+            )
 
-        yield OutboundWSMessage(
-            type=ServerMessageType.TRANSCRIPTION,
-            text=transcript,
-            is_final=True
-        )
-
-        # 2. Process text prompt against active ViewContext
-        async for msg in self.process_text_prompt(transcript):
-            yield msg
+            # 2. Process text prompt against active ViewContext
+            async for msg in self.process_text_prompt(transcript):
+                yield msg
+        finally:
+            self.clear_audio_buffer()
 
     async def process_text_prompt(self, prompt: str) -> AsyncGenerator[OutboundWSMessage, None]:
         """Process natural language command against ViewContext with multi-turn memory."""

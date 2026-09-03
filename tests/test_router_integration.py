@@ -78,3 +78,79 @@ def test_independent_fastapi_app_integration():
         assert len(actions) == 1
         assert actions[0]["target_id"] == "email_notifications_toggle"
         assert actions[0]["payload"]["state"] is False
+
+
+def test_continuous_voice_multiturn_interaction():
+    """Verify continuous voice mode: multiple consecutive voice turns with clean STT buffer resets."""
+    app = FastAPI(title="Continuous Voice App")
+    registry = MCPRegistry()
+    copilot_router = create_copilot_router(
+        registry=registry,
+        llm_backend="mock",
+        endpoint_path="/ws/copilot"
+    )
+    app.include_router(copilot_router)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/copilot") as ws:
+        # 1. Handshake
+        init_data = json.loads(ws.receive_text())
+        assert init_data["type"] == "SESSION_INIT"
+
+        # 2. ViewContext Update
+        ctx = ViewContext(
+            screen_id="checkout",
+            title="Checkout Screen",
+            components=[
+                UIComponent(
+                    id="submit_order_btn",
+                    type="button",
+                    label="Place Order",
+                    allowed_actions=["click"]
+                )
+            ]
+        )
+        ws.send_text(json.dumps({
+            "type": "VIEW_CONTEXT_UPDATE",
+            "view_context": ctx.model_dump()
+        }))
+
+        # TURN 1: Stream binary PCM audio chunks, then AUDIO_END
+        dummy_pcm_chunk_1 = b"\x00\x00" * 800  # 1600 bytes = 800 16-bit PCM samples
+        dummy_pcm_chunk_2 = b"\x01\x00" * 800
+        ws.send_bytes(dummy_pcm_chunk_1)
+        ws.send_bytes(dummy_pcm_chunk_2)
+
+        ws.send_text(json.dumps({"type": "AUDIO_END"}))
+
+        # Collect Turn 1 responses until AUDIO_STREAM_END
+        turn_1_types = []
+        while True:
+            msg = json.loads(ws.receive_text())
+            turn_1_types.append(msg["type"])
+            if msg["type"] == "AUDIO_STREAM_END":
+                break
+
+        assert "TRANSCRIPTION" in turn_1_types
+        assert "AGENT_RESPONSE" in turn_1_types
+        assert "AUDIO_RESPONSE" in turn_1_types
+        assert "AUDIO_STREAM_END" in turn_1_types
+
+        # TURN 2: Stream consecutive binary PCM audio turn without disconnecting
+        dummy_pcm_chunk_3 = b"\x02\x00" * 800
+        ws.send_bytes(dummy_pcm_chunk_3)
+        ws.send_text(json.dumps({"type": "AUDIO_END"}))
+
+        # Collect Turn 2 responses until AUDIO_STREAM_END
+        turn_2_types = []
+        while True:
+            msg = json.loads(ws.receive_text())
+            turn_2_types.append(msg["type"])
+            if msg["type"] == "AUDIO_STREAM_END":
+                break
+
+        assert "TRANSCRIPTION" in turn_2_types
+        assert "AGENT_RESPONSE" in turn_2_types
+        assert "AUDIO_RESPONSE" in turn_2_types
+        assert "AUDIO_STREAM_END" in turn_2_types
+

@@ -9,6 +9,11 @@
 ## 🌟 Key Features
 
 - **🚫 Zero DOM Scraping**: Operates exclusively on declarative `ViewContext` (Semantic UI State).
+- **🗣️ Continuous Voice Conversation (ChatGPT Voice Mode)**:
+  - Client-Side Voice Activity Detection (VAD) via Web Audio API `AnalyserNode`.
+  - Rolling pre-speech buffer (~400ms) prevents clipping initial syllables.
+  - Zero backend CPU saturation (silence is never streamed over WebSockets).
+  - Automatic conversation resumption after TTS playback completes.
 - **⚡ Strict 16GB VRAM Budget**:
   - **STT** (`faster-whisper` CPU `int8`): Multi-threaded CPU execution (**0.0 GB VRAM**).
   - **TTS** (Acoustic Chime / Web Speech API): Lightweight CPU synthesis (**0.0 GB VRAM**).
