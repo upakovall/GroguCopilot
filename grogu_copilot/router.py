@@ -60,7 +60,7 @@ def create_copilot_router(
     shared_registry = registry or MCPRegistry()
 
     # Configure LLM provider
-    if llm_backend in ["vllm", "llama_cpp", "openai_compatible", "runpod"]:
+    if llm_backend in ["vllm", "llama_cpp", "openai_compatible", "runpod", "ollama"]:
         llm_provider = OpenAIGuidedProvider(
             api_base=llm_api_base or "http://localhost:8001/v1",
             api_key=llm_api_key,
